@@ -59,6 +59,21 @@ async fn link_stats(Path(id): Path<String>) -> Json<Stats> {
 
 #[tokio::main]
 async fn main() {
+    let _pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .connect("sqlite:shortlink.db?mode=rwc")
+        .await
+        .unwrap();
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            url TEXT NOT NULL,
+            hits INTEGER NOT NULL DEFAULT 0
+        )",
+    )
+    .execute(&_pool)
+    .await
+    .unwrap();
+
     let app = Router::new()
         .route("/health", get(health))
         .route("/links", post(create_link))
