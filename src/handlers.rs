@@ -6,7 +6,8 @@ use axum::{
 };
 
 use crate::codes::{gen_code, is_unique_violation};
-use crate::models::{AppState, CreateLink, ErrorBody, Link, Stats};
+use crate::error::AppError;
+use crate::models::{AppState, CreateLink, Link, Stats};
 
 pub async fn health() -> &'static str {
     "ok"
@@ -15,14 +16,9 @@ pub async fn health() -> &'static str {
 pub async fn create_link(
     State(state): State<AppState>,
     Json(payload): Json<CreateLink>,
-) -> Result<(StatusCode, Json<Link>), (StatusCode, Json<ErrorBody>)> {
+) -> Result<(StatusCode, Json<Link>), AppError> {
     if !payload.url.starts_with("http://") && !payload.url.starts_with("https://") {
-        return Err((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(ErrorBody {
-                error: "url must start with http:// or https://".to_string(),
-            }),
-        ));
+        return Err(AppError::InvalidUrl);
     }
 
     loop {
@@ -43,32 +39,22 @@ pub async fn create_link(
                 ));
             }
             Err(e) if is_unique_violation(&e) => continue,
-            Err(e) => {
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorBody {
-                        error: e.to_string(),
-                    }),
-                ));
-            }
+            Err(e) => return Err(e.into()),
         }
     }
 }
 
-pub async fn redirect_link(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+pub async fn redirect_link(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, AppError> {
     let row: Option<(String,)> = sqlx::query_as("SELECT url FROM links WHERE code = ?")
         .bind(&id)
         .fetch_optional(&state.db_pool)
         .await
-        .unwrap_or(None);
+        .map_err(AppError::Db)?;
     let Some((url,)) = row else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(ErrorBody {
-                error: "link not found".to_string(),
-            }),
-        )
-            .into_response();
+        return Err(AppError::NotFound);
     };
 
     sqlx::query("UPDATE links SET hits = hits + 1 WHERE code = ?")
@@ -79,27 +65,22 @@ pub async fn redirect_link(State(state): State<AppState>, Path(id): Path<String>
 
     let location = HeaderValue::from_str(&url).unwrap_or(HeaderValue::from_static("/"));
 
-    (StatusCode::FOUND, [(header::LOCATION, location)]).into_response()
+    Ok((StatusCode::FOUND, [(header::LOCATION, location)]).into_response())
 }
 
 pub async fn link_stats(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<Stats>, (StatusCode, Json<ErrorBody>)> {
+) -> Result<Json<Stats>, AppError> {
     let row: Option<(String, i64, String)> =
         sqlx::query_as("SELECT url, hits, created_at FROM links WHERE code = ?")
             .bind(&id)
             .fetch_optional(&state.db_pool)
             .await
-            .unwrap_or(None);
+            .map_err(AppError::Db)?;
 
     let Some((url, hits, created_at)) = row else {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(ErrorBody {
-                error: "link not found".to_string(),
-            }),
-        ));
+        return Err(AppError::NotFound);
     };
 
     Ok(Json(Stats {
