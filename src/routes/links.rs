@@ -9,10 +9,6 @@ use crate::codes::{gen_code, is_unique_violation};
 use crate::error::AppError;
 use crate::models::{AppState, CreateLink, Link, Stats};
 
-pub async fn health() -> &'static str {
-    "ok"
-}
-
 pub async fn create_link(
     State(state): State<AppState>,
     Json(payload): Json<CreateLink>,
