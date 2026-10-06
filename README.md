@@ -1,4 +1,4 @@
-# rust-shortlink
+# rust-shortlink-api
 
 A URL shortener with visit stats.
 
