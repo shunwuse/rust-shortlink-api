@@ -1,11 +1,4 @@
-mod codes;
-mod config;
-mod db;
-mod error;
-mod models;
-mod routes;
-
-use models::AppState;
+use rust_shortlink_api::{config, db, models::AppState, routes};
 
 #[tokio::main]
 async fn main() {
