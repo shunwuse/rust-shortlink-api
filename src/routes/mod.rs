@@ -5,6 +5,7 @@ use axum::{
     Router,
     routing::{get, post},
 };
+use tower_http::trace::TraceLayer;
 
 use crate::models::AppState;
 
@@ -18,4 +19,5 @@ pub fn create_router(state: AppState) -> Router {
         .route("/links/{id}/stats", get(link_stats))
         .route("/{id}", get(redirect_link))
         .with_state(state)
+        .layer(TraceLayer::new_for_http())
 }

@@ -82,14 +82,18 @@ triggers bash history expansion.
 
 ## Configuration
 
-| Variable     | Default                        | Purpose              |
-| ------------ | ------------------------------ | -------------------- |
-| `PORT`       | `3000`                         | Port to listen on    |
-| `DATABASE_URL` | `sqlite:shortlink.db?mode=rwc` | SQLite database file |
+| Variable     | Default                                      | Purpose                    |
+| ------------ | -------------------------------------------- | -------------------------- |
+| `PORT`       | `3000`                                       | Port to listen on          |
+| `DATABASE_URL` | `sqlite:shortlink.db?mode=rwc`               | SQLite database file       |
+| `RUST_LOG`   | `rust_shortlink_api=debug,tower_http=debug`  | Log filter (tracing syntax) |
 
 ```bash
 PORT=8080 cargo run
 # serves on localhost:8080
+
+RUST_LOG=warn cargo run
+# quiets request logs
 ```
 
 Invalid `PORT` values fall back to `3000`.

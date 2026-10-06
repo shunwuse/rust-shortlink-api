@@ -11,6 +11,10 @@ use models::AppState;
 async fn main() {
     let config = config::Config::from_env();
 
+    tracing_subscriber::fmt()
+        .with_env_filter(config.log_filter.as_str())
+        .init();
+
     let pool = db::init_pool(&config.database_url).await;
     db::create_tables(&pool).await;
 
