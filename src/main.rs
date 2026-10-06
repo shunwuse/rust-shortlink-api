@@ -1,11 +1,12 @@
 use axum::{
     Json, Router,
-    extract::Path,
+    extract::{Path, State},
     http::{StatusCode, header},
     response::IntoResponse,
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 
 async fn health() -> &'static str {
     "ok"
@@ -23,11 +24,21 @@ struct Link {
 }
 
 #[derive(Serialize)]
+struct ErrorBody {
+    error: String,
+}
+
+#[derive(Serialize)]
 struct Stats {
     id: String,
     url: String,
     hits: i64,
     created_at: String,
+}
+
+#[derive(Clone)]
+struct AppState {
+    db_pool: SqlitePool,
 }
 
 const BASE62_CHARS: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -65,14 +76,41 @@ mod tests {
     }
 }
 
-async fn create_link(Json(payload): Json<CreateLink>) -> (StatusCode, Json<Link>) {
-    (
+async fn create_link(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateLink>,
+) -> Result<(StatusCode, Json<Link>), (StatusCode, Json<ErrorBody>)> {
+    if !payload.url.starts_with("http://") && !payload.url.starts_with("https://") {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(ErrorBody {
+                error: "url must start with http:// or https://".to_string(),
+            }),
+        ));
+    }
+
+    let result = sqlx::query("INSERT INTO links (url, hits) VALUES (?, 0)")
+        .bind(&payload.url)
+        .execute(&state.db_pool)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorBody {
+                    error: e.to_string(),
+                }),
+            )
+        })?;
+
+    let id = encode_base62(result.last_insert_rowid());
+
+    Ok((
         StatusCode::CREATED,
         Json(Link {
-            id: "1".to_string(),
+            id,
             url: payload.url,
         }),
-    )
+    ))
 }
 
 async fn redirect_link(Path(id): Path<String>) -> impl IntoResponse {
@@ -94,7 +132,7 @@ async fn link_stats(Path(id): Path<String>) -> Json<Stats> {
 
 #[tokio::main]
 async fn main() {
-    let _pool = sqlx::sqlite::SqlitePoolOptions::new()
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .connect("sqlite:shortlink.db?mode=rwc")
         .await
         .unwrap();
@@ -105,15 +143,17 @@ async fn main() {
             hits INTEGER NOT NULL DEFAULT 0
         )",
     )
-    .execute(&_pool)
+    .execute(&pool)
     .await
     .unwrap();
 
+    let state = AppState { db_pool: pool };
     let app = Router::new()
         .route("/health", get(health))
         .route("/links", post(create_link))
         .route("/links/{id}/stats", get(link_stats))
-        .route("/{id}", get(redirect_link));
+        .route("/{id}", get(redirect_link))
+        .with_state(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();
