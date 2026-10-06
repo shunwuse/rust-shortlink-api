@@ -54,7 +54,7 @@ Errors are JSON (`{ "error": "message" }`) with the matching status code (400 / 
 - Web: `axum` + `tokio`
 - DB: `sqlx` + `sqlite`
 - Errors: `thiserror` + `anyhow`
-- Codes: auto-increment id encoded as base62
+- Codes: random 7-char base62 strings, `code TEXT PRIMARY KEY`
 
 ## Milestones
 

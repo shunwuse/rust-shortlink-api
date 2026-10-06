@@ -5,6 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
@@ -42,34 +43,23 @@ struct AppState {
 }
 
 const BASE62_CHARS: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+const CODE_LEN: usize = 7;
 
-fn encode_base62(mut num: i64) -> String {
-    let mut encoded = Vec::new();
+fn gen_code() -> String {
+    let mut rng = rand::rng();
 
-    if num == 0 {
-        return "0".to_string();
-    }
-
-    while num > 0 {
-        let rem = (num % 62) as usize;
-        encoded.push(BASE62_CHARS[rem]);
-        num /= 62;
-    }
-
-    encoded.reverse();
-
-    String::from_utf8(encoded).unwrap()
+    (0..CODE_LEN)
+        .map(|_| {
+            let idx = rng.random_range(0..BASE62_CHARS.len());
+            BASE62_CHARS[idx] as char
+        })
+        .collect()
 }
 
-fn decode_base62(s: &str) -> Option<i64> {
-    let mut num: i64 = 0;
-
-    for b in s.bytes() {
-        let v = BASE62_CHARS.iter().position(|&c| c == b)? as i64;
-        num = num.checked_mul(62)?.checked_add(v)?;
-    }
-
-    Some(num)
+fn is_unique_violation(e: &sqlx::Error) -> bool {
+    e.as_database_error()
+        .and_then(|d| d.code())
+        .is_some_and(|code| code == "2067")
 }
 
 #[cfg(test)]
@@ -77,25 +67,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_encode_base62() {
-        assert_eq!(encode_base62(0), "0");
-        assert_eq!(encode_base62(1), "1");
-        assert_eq!(encode_base62(61), "z");
-        assert_eq!(encode_base62(62), "10");
-        assert_eq!(encode_base62(3843), "zz");
-        assert_eq!(encode_base62(238327), "zzz");
-    }
-
-    #[test]
-    fn test_decode_base62() {
-        assert_eq!(decode_base62("0"), Some(0));
-        assert_eq!(decode_base62("1"), Some(1));
-        assert_eq!(decode_base62("z"), Some(61));
-        assert_eq!(decode_base62("10"), Some(62));
-        assert_eq!(decode_base62("zz"), Some(3843));
-        assert_eq!(decode_base62("zzz"), Some(238327));
-        assert_eq!(decode_base62("nope-!"), None);
-        assert_eq!(decode_base62(""), Some(0));
+    fn generated_codes_have_expected_shape() {
+        for _ in 0..100 {
+            let code = gen_code();
+            assert_eq!(code.len(), CODE_LEN);
+            assert!(code.bytes().all(|b| BASE62_CHARS.contains(&b)));
+        }
     }
 }
 
@@ -112,43 +89,39 @@ async fn create_link(
         ));
     }
 
-    let result = sqlx::query("INSERT INTO links (url, hits) VALUES (?, 0)")
-        .bind(&payload.url)
-        .execute(&state.db_pool)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorBody {
-                    error: e.to_string(),
-                }),
-            )
-        })?;
-
-    let id = encode_base62(result.last_insert_rowid());
-
-    Ok((
-        StatusCode::CREATED,
-        Json(Link {
-            id,
-            url: payload.url,
-        }),
-    ))
+    loop {
+        let code = gen_code();
+        match sqlx::query("INSERT INTO links (code, url, hits) VALUES (?, ?, 0)")
+            .bind(&code)
+            .bind(&payload.url)
+            .execute(&state.db_pool)
+            .await
+        {
+            Ok(_) => {
+                return Ok((
+                    StatusCode::CREATED,
+                    Json(Link {
+                        id: code,
+                        url: payload.url,
+                    }),
+                ));
+            }
+            Err(e) if is_unique_violation(&e) => continue,
+            Err(e) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorBody {
+                        error: e.to_string(),
+                    }),
+                ));
+            }
+        }
+    }
 }
 
 async fn redirect_link(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    let Some(rowid) = decode_base62(&id) else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(ErrorBody {
-                error: "link not found".to_string(),
-            }),
-        )
-            .into_response();
-    };
-
-    let row: Option<(String,)> = sqlx::query_as("SELECT url FROM links WHERE id = ?")
-        .bind(rowid)
+    let row: Option<(String,)> = sqlx::query_as("SELECT url FROM links WHERE code = ?")
+        .bind(&id)
         .fetch_optional(&state.db_pool)
         .await
         .unwrap_or(None);
@@ -162,8 +135,8 @@ async fn redirect_link(State(state): State<AppState>, Path(id): Path<String>) ->
             .into_response();
     };
 
-    sqlx::query("UPDATE links SET hits = hits + 1 WHERE id = ?")
-        .bind(rowid)
+    sqlx::query("UPDATE links SET hits = hits + 1 WHERE code = ?")
+        .bind(&id)
         .execute(&state.db_pool)
         .await
         .ok();
@@ -177,18 +150,9 @@ async fn link_stats(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Stats>, (StatusCode, Json<ErrorBody>)> {
-    let Some(rowid) = decode_base62(&id) else {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(ErrorBody {
-                error: "link not found".to_string(),
-            }),
-        ));
-    };
-
     let row: Option<(String, i64, String)> =
-        sqlx::query_as("SELECT url, hits, created_at FROM links WHERE id = ?")
-            .bind(rowid)
+        sqlx::query_as("SELECT url, hits, created_at FROM links WHERE code = ?")
+            .bind(&id)
             .fetch_optional(&state.db_pool)
             .await
             .unwrap_or(None);
@@ -218,7 +182,7 @@ async fn main() {
         .unwrap();
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS links (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT PRIMARY KEY,
             url TEXT NOT NULL,
             hits INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
