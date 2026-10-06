@@ -1,8 +1,8 @@
 use axum::{
     Json, Router,
     extract::{Path, State},
-    http::{StatusCode, header},
-    response::IntoResponse,
+    http::{HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
@@ -136,12 +136,41 @@ async fn create_link(
     ))
 }
 
-async fn redirect_link(Path(id): Path<String>) -> impl IntoResponse {
-    let _ = id;
-    (
-        StatusCode::FOUND,
-        [(header::LOCATION, "https://example.com")],
-    )
+async fn redirect_link(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    let Some(rowid) = decode_base62(&id) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody {
+                error: "link not found".to_string(),
+            }),
+        )
+            .into_response();
+    };
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT url FROM links WHERE id = ?")
+        .bind(rowid)
+        .fetch_optional(&state.db_pool)
+        .await
+        .unwrap_or(None);
+    let Some((url,)) = row else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody {
+                error: "link not found".to_string(),
+            }),
+        )
+            .into_response();
+    };
+
+    sqlx::query("UPDATE links SET hits = hits + 1 WHERE id = ?")
+        .bind(rowid)
+        .execute(&state.db_pool)
+        .await
+        .ok();
+
+    let location = HeaderValue::from_str(&url).unwrap_or(HeaderValue::from_static("/"));
+
+    (StatusCode::FOUND, [(header::LOCATION, location)]).into_response()
 }
 
 async fn link_stats(Path(id): Path<String>) -> Json<Stats> {
