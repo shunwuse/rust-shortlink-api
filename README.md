@@ -18,13 +18,18 @@ A URL shortener with visit stats.
 ## Project Layout
 
 ```text
-src/main.rs      # bootstrap: config, pool, routes, serve
-src/config.rs    # PORT and DATABASE_URL from env
-src/handlers.rs  # HTTP handlers (no SQL here besides store calls)
-src/db.rs        # pool setup and table creation
-src/codes.rs     # short code generation
-src/models.rs    # request/response structs and app state
-src/error.rs     # AppError and status code mapping
+src/main.rs        # bootstrap: config, pool, routes, serve
+src/lib.rs         # shared library target for integration tests
+src/config.rs      # PORT, DATABASE_URL, and RUST_LOG from env
+src/routes/        # HTTP layer: router assembly and handlers
+  mod.rs           # create_router with all routes and middleware
+  health.rs        # GET /health
+  links.rs         # link creation, redirect, and stats
+src/db.rs          # pool setup and table creation
+src/codes.rs       # short code generation
+src/models.rs      # request/response structs and app state
+src/error.rs       # AppError and status code mapping
+tests/api.rs       # end-to-end lifecycle test (in-memory SQLite)
 ```
 
 ## Quick Start
@@ -133,9 +138,9 @@ Errors are JSON (`{ "error": "message" }`) with the matching status code
 ## Development
 
 ```bash
-cargo test                  # unit tests
+cargo test                  # unit + integration tests (in-memory DB, no ports)
 cargo fmt --check           # formatting
-cargo clippy -- -D warnings # lints
+cargo clippy --all-targets -- -D warnings # lints including tests
 ```
 
 Out of scope for now: custom codes, expiration, rate limiting, metrics, Postgres.
