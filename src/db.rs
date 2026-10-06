@@ -1,8 +1,8 @@
 use sqlx::SqlitePool;
 
-pub async fn init_pool() -> SqlitePool {
+pub async fn init_pool(database_url: &str) -> SqlitePool {
     sqlx::sqlite::SqlitePoolOptions::new()
-        .connect("sqlite:shortlink.db?mode=rwc")
+        .connect(database_url)
         .await
         .unwrap()
 }

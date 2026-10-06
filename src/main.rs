@@ -1,4 +1,5 @@
 mod codes;
+mod config;
 mod db;
 mod error;
 mod handlers;
@@ -14,7 +15,9 @@ use models::AppState;
 
 #[tokio::main]
 async fn main() {
-    let pool = db::init_pool().await;
+    let config = config::Config::from_env();
+
+    let pool = db::init_pool(&config.database_url).await;
     db::create_tables(&pool).await;
 
     let state = AppState { db_pool: pool };
@@ -24,6 +27,9 @@ async fn main() {
         .route("/links/{id}/stats", get(link_stats))
         .route("/{id}", get(redirect_link))
         .with_state(state);
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+
+    let addr = format!("0.0.0.0:{}", config.port);
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+
     axum::serve(listener, app).await.unwrap();
 }
