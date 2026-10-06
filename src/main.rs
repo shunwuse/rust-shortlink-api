@@ -30,6 +30,41 @@ struct Stats {
     created_at: String,
 }
 
+const BASE62_CHARS: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+fn encode_base62(mut num: i64) -> String {
+    let mut encoded = Vec::new();
+
+    if num == 0 {
+        return "0".to_string();
+    }
+
+    while num > 0 {
+        let rem = (num % 62) as usize;
+        encoded.push(BASE62_CHARS[rem]);
+        num /= 62;
+    }
+
+    encoded.reverse();
+
+    String::from_utf8(encoded).unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_encode_base62() {
+        assert_eq!(encode_base62(0), "0");
+        assert_eq!(encode_base62(1), "1");
+        assert_eq!(encode_base62(61), "z");
+        assert_eq!(encode_base62(62), "10");
+        assert_eq!(encode_base62(3843), "zz");
+        assert_eq!(encode_base62(238327), "zzz");
+    }
+}
+
 async fn create_link(Json(payload): Json<CreateLink>) -> (StatusCode, Json<Link>) {
     (
         StatusCode::CREATED,
