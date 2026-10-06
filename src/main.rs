@@ -61,6 +61,17 @@ fn encode_base62(mut num: i64) -> String {
     String::from_utf8(encoded).unwrap()
 }
 
+fn decode_base62(s: &str) -> Option<i64> {
+    let mut num: i64 = 0;
+
+    for b in s.bytes() {
+        let v = BASE62_CHARS.iter().position(|&c| c == b)? as i64;
+        num = num.checked_mul(62)?.checked_add(v)?;
+    }
+
+    Some(num)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,6 +84,18 @@ mod tests {
         assert_eq!(encode_base62(62), "10");
         assert_eq!(encode_base62(3843), "zz");
         assert_eq!(encode_base62(238327), "zzz");
+    }
+
+    #[test]
+    fn test_decode_base62() {
+        assert_eq!(decode_base62("0"), Some(0));
+        assert_eq!(decode_base62("1"), Some(1));
+        assert_eq!(decode_base62("z"), Some(61));
+        assert_eq!(decode_base62("10"), Some(62));
+        assert_eq!(decode_base62("zz"), Some(3843));
+        assert_eq!(decode_base62("zzz"), Some(238327));
+        assert_eq!(decode_base62("nope-!"), None);
+        assert_eq!(decode_base62(""), Some(0));
     }
 }
 
