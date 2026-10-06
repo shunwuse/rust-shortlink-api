@@ -173,13 +173,41 @@ async fn redirect_link(State(state): State<AppState>, Path(id): Path<String>) ->
     (StatusCode::FOUND, [(header::LOCATION, location)]).into_response()
 }
 
-async fn link_stats(Path(id): Path<String>) -> Json<Stats> {
-    Json(Stats {
+async fn link_stats(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Stats>, (StatusCode, Json<ErrorBody>)> {
+    let Some(rowid) = decode_base62(&id) else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody {
+                error: "link not found".to_string(),
+            }),
+        ));
+    };
+
+    let row: Option<(String, i64, String)> =
+        sqlx::query_as("SELECT url, hits, created_at FROM links WHERE id = ?")
+            .bind(rowid)
+            .fetch_optional(&state.db_pool)
+            .await
+            .unwrap_or(None);
+
+    let Some((url, hits, created_at)) = row else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody {
+                error: "link not found".to_string(),
+            }),
+        ));
+    };
+
+    Ok(Json(Stats {
         id,
-        url: "https://example.com".to_string(),
-        hits: 0,
-        created_at: "2026-10-05T00:00:00Z".to_string(),
-    })
+        url,
+        hits,
+        created_at,
+    }))
 }
 
 #[tokio::main]
@@ -192,7 +220,8 @@ async fn main() {
         "CREATE TABLE IF NOT EXISTS links (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             url TEXT NOT NULL,
-            hits INTEGER NOT NULL DEFAULT 0
+            hits INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
         )",
     )
     .execute(&pool)
